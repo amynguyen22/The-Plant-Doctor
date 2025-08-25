@@ -1,3 +1,5 @@
-import * as React from 'react'
-export function Label({ className, ...props }: React.LabelHTMLAttributes<HTMLLabelElement>){ return <label className={['text-sm font-medium', className].filter(Boolean).join(' ')} {...props} /> }
-export default Label
+import React from 'react'
+
+export function Label(props: React.LabelHTMLAttributes<HTMLLabelElement>) {
+  return <label {...props} className={`mb-1 block text-sm font-medium ${props.className||''}`} />
+}
