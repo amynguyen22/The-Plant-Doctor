@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import { useRef, useState } from "react";
+import type { ChangeEventHandler } from "react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
@@ -26,6 +27,7 @@ const SOIL = [
 ];
 
 export default function PlantDoctorApp() {
+
   // --- Basic state ---
   const [plantName, setPlantName] = useState("");
   const [plantType, setPlantType] = useState("");
@@ -35,6 +37,29 @@ export default function PlantDoctorApp() {
   const [symptoms, setSymptoms] = useState<string[]>([]);
   const [soil, setSoil] = useState<Record<string, boolean>>({});
   const [fertilized, setFertilized] = useState(false);
+
+  // Image Submission
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleChooseFile = () => fileInputRef.current?.click();
+
+  const handleFileChange: ChangeEventHandler<HTMLInputElement> = (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = () => setImageUrl(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const onDrop: React.DragEventHandler<HTMLDivElement> = (e) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (!file || !file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = () => setImageUrl(reader.result as string);
+    reader.readAsDataURL(file);
+  };
 
   // Submitted snapshot (for Results display)
   const [submitted, setSubmitted] = useState<null | {
@@ -103,8 +128,37 @@ export default function PlantDoctorApp() {
               </CardHeader>
               <CardContent className="space-y-5">
                 {/* Upload placeholder */}
-                <div className="border-2 border-dashed rounded-xl p-6 text-center text-gray-500">
-                  Photo upload
+                <div
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={onDrop}
+                  className="border-2 border-dashed rounded-2xl p-6 text-center bg-white hover:bg-emerald-50 transition"
+                >
+                  {imageUrl ? (
+                    <div className="space-y-3">
+                      <img
+                        src={imageUrl}
+                        alt="Plant preview"
+                        className="mx-auto max-h-80 rounded-xl object-contain"
+                      />
+                      <div className="flex justify-center gap-2">
+                        <Button variant="secondary" onClick={handleChooseFile}>Replace photo</Button>
+                        <Button variant="ghost" onClick={() => setImageUrl(null)}>Remove</Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 text-gray-600">
+                      <div>Drop an image here</div>
+                      <div>or</div>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleFileChange}
+                      />
+                      <Button onClick={handleChooseFile}>Choose image</Button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Basic text inputs */}
