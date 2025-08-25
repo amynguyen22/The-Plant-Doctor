@@ -26,8 +26,95 @@ const SOIL = [
   { id: "soil_loose", label: "Soil loose/airy" },
 ];
 
-export default function PlantDoctorApp() {
+interface DiagnosisResult {
+  issue: string;
+  confidence: number; // 0..1
+  reasons: string[];
+  actions: string[];
+  urgency?: "low" | "medium" | "high";
+}
 
+// Simple rule engine
+function analyze(
+  symptoms: string[],
+  soil: Record<string, boolean>,
+  fertilized: boolean,
+  notes: string
+): DiagnosisResult[] {
+  const s = new Set(symptoms);
+  const out: DiagnosisResult[] = [];
+  const soggy = !!soil["soil_soggy"];
+  const veryDry = !!soil["soil_dry"];
+
+  // Overwatering / Root rot
+  if ((s.has("yellowing") || s.has("leaf_drop") || s.has("wilting")) && (soggy || s.has("mushy_stem"))) {
+    out.push({
+      issue: s.has("mushy_stem") ? "Root rot from overwatering" : "Overwatering",
+      confidence: s.has("mushy_stem") ? 0.9 : 0.7,
+      urgency: s.has("mushy_stem") ? "high" : "medium",
+      reasons: [
+        s.has("yellowing") ? "Yellowing present" : "",
+        s.has("leaf_drop") ? "Leaves dropping" : "",
+        soggy ? "Soil reported soggy" : "",
+        s.has("mushy_stem") ? "Mushy stem suggests rot" : "",
+      ].filter(Boolean),
+      actions: [
+        "Check roots and trim mushy parts",
+        "Repot into well-draining mix; ensure drainage holes",
+        "Let top inch or two dry before next watering",
+      ],
+    });
+  }
+
+  // Underwatering
+  if ((s.has("wilting") || s.has("browning_tips") || s.has("leaf_drop")) && veryDry) {
+    out.push({
+      issue: "Underwatering",
+      confidence: 0.75,
+      urgency: "medium",
+      reasons: ["Soil very dry", s.has("wilting") ? "Wilting" : "", s.has("browning_tips") ? "Crispy tips" : ""].filter(Boolean),
+      actions: [
+        "Water thoroughly until drainage; empty saucer",
+        "Adopt a schedule; check moisture with finger or meter",
+      ],
+    });
+  }
+
+  // Pests
+  if (s.has("webbing")) {
+    out.push({ issue: "Spider mites", confidence: 0.85, urgency: "medium", reasons: ["Fine webbing present"], actions: ["Isolate; shower foliage", "Insecticidal soap/neem weekly x3"] });
+  }
+  if (s.has("white_cotton")) {
+    out.push({ issue: "Mealybugs", confidence: 0.85, urgency: "medium", reasons: ["White cottony tufts"], actions: ["Dab with alcohol", "Follow with soap/neem"] });
+  }
+  if (s.has("sticky") && s.has("tiny_flies")) {
+    out.push({ issue: "Fungus gnats / honeydew check", confidence: 0.6, urgency: "low", reasons: ["Sticky residue + tiny flies"], actions: ["Dry topsoil between waterings", "Yellow sticky traps", "Optional BTi drench"] });
+  }
+
+  // Nutrients
+  if (s.has("yellowing") && !soggy && !veryDry) {
+    let conf = 0.45;
+    if (fertilized) conf -= 0.05;
+    out.push({ issue: "Possible nutrient deficiency", confidence: Math.max(0, conf), urgency: "low", reasons: ["Yellowing without clear watering issue"], actions: ["Balanced fertilizer at 1/2 strength in growing season"] });
+  }
+
+  // Notes keyword nudge
+  const txt = notes.toLowerCase();
+  const bump = (k: string, amt: number) => (txt.includes(k) ? amt : 0);
+  const adjusted = out.map((r) => ({
+    ...r,
+    confidence: Math.max(0, Math.min(1, r.confidence + bump("for days", 0.05) + bump("weeks", 0.05))),
+  }));
+
+  if (adjusted.length === 0) {
+    adjusted.push({ issue: "No clear issue detected", confidence: 0.2, urgency: "low", reasons: ["Try selecting more specific symptoms"], actions: ["Check watering routine", "Verify light", "Inspect for pests"] });
+  }
+
+  return adjusted.sort((a, b) => b.confidence - a.confidence);
+}
+
+export default function PlantDoctorApp() {
+  
   // --- Basic state ---
   const [plantName, setPlantName] = useState("");
   const [plantType, setPlantType] = useState("");
@@ -41,6 +128,10 @@ export default function PlantDoctorApp() {
   // Image Submission
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Results
+  const [results, setResults] = useState<DiagnosisResult[] | null>(null);
+  const resultsRef = useRef<HTMLDivElement | null>(null); 
 
   const handleChooseFile = () => fileInputRef.current?.click();
 
@@ -80,15 +171,9 @@ export default function PlantDoctorApp() {
     setSoil((prev) => ({ ...prev, [id]: !prev[id] }));
 
   const onDiagnose = () => {
-    setSubmitted({
-      plantName,
-      plantType,
-      environment,
-      notes,
-      symptoms,
-      soil,
-      fertilized,
-    });
+    const res = analyze(symptoms, soil, fertilized, notes);
+    setResults(res);
+    setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   };
 
   const onReset = () => {
@@ -99,7 +184,9 @@ export default function PlantDoctorApp() {
     setSymptoms([]);
     setSoil({});
     setFertilized(false);
-    setSubmitted(null);
+    setResults(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    
   };
 
   return (
@@ -268,29 +355,40 @@ export default function PlantDoctorApp() {
             </Card>
 
             {/* Results */}
+            <div ref={resultsRef} />
+            {results && (
             <Card>
               <CardHeader>
                 <CardTitle>Results</CardTitle>
                 <CardDescription>Results will show here</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                {!submitted ? (
-                  <p className="text-gray-500">Run a diagnosis to see your captured inputs.</p>
-                ) : (
-                  <>
-                    <div><span className="font-medium">Plant:</span> {submitted.plantName || "—"} ({submitted.plantType || "—"})</div>
-                    <div><span className="font-medium">Environment:</span> {submitted.environment || "—"}</div>
-                    <div><span className="font-medium">Fertilized recently:</span> {submitted.fertilized ? "Yes" : "No"}</div>
-                    <div><span className="font-medium">Symptoms:</span> {submitted.symptoms.length ? submitted.symptoms.join(", ") : "—"}</div>
-                    <div>
-                      <span className="font-medium">Soil condition:</span>{" "}
-                      {Object.keys(submitted.soil).filter((k) => submitted.soil[k]).join(", ") || "—"}
+                <CardContent className="space-y-4">
+                  {results.map((r, i) => (
+                    <div key={i} className="border rounded-2xl p-4 bg-white">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-medium text-lg">{r.issue}</div>
+                        <span className="text-xs rounded-full px-2 py-0.5 bg-gray-100">{Math.round(r.confidence * 100)}%</span>
+                      </div>
+                      {r.reasons.length > 0 && (
+                        <ul className="list-disc pl-6 mt-2 text-sm text-gray-700">
+                          {r.reasons.map((reason, idx) => (
+                            <li key={idx}>{reason}</li>
+                          ))}
+                        </ul>
+                      )}
+                      <div className="mt-3">
+                        <div className="text-sm font-medium">What to do now</div>
+                        <ul className="list-disc pl-6 text-sm mt-1">
+                          {r.actions.map((a, idx) => (
+                            <li key={idx}>{a}</li>
+                          ))}
+                        </ul>
+                      </div>
                     </div>
-                    <div><span className="font-medium">Notes:</span> {submitted.notes || "—"}</div>
-                  </>
-                )}
-              </CardContent>
+                  ))}
+                </CardContent>
             </Card>
+            )}
           </TabsContent>
 
           {/* History */}
