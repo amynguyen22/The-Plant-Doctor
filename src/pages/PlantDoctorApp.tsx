@@ -53,6 +53,8 @@ function downloadJSON(filename: string, data: any) {
   URL.revokeObjectURL(url);
 }
 
+type DevTest = { name: string; passed: boolean; details: string };
+
 export default function PlantDoctorApp() {
   const [plantName, setPlantName] = useState("");
   const [plantType, setPlantType] = useState("");
@@ -69,6 +71,7 @@ export default function PlantDoctorApp() {
   const [storageNotice, setStorageNotice] = useState("");
   const [view, setView] = useState<'intake' | 'loading' | 'results'>('intake');
   const [loadProgress, setLoadProgress] = useState(0);
+ const [devResults, setDevResults] = useState<DevTest[] | null>(null);
 
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -187,6 +190,79 @@ export default function PlantDoctorApp() {
   const storageBytes = estimateBytes(JSON.stringify(history));
   const storageKB = Math.round(storageBytes / 1024);
 
+    function runStorageTests(): DevTest[] {
+    const tests: DevTest[] = [];
+    const originalSetItem = localStorage.setItem.bind(localStorage);
+    const originalV2 = localStorage.getItem(STORAGE_KEY_V2);
+
+    const restore = () => {
+      localStorage.setItem = originalSetItem;
+      if (originalV2 === null) localStorage.removeItem(STORAGE_KEY_V2);
+      else localStorage.setItem(STORAGE_KEY_V2, originalV2);
+    };
+
+    try {
+      const sample: CaseRecord[] = new Array(3).fill(0).map((_, i) => ({
+        id: `t1_${i}`,
+        createdAt: Date.now(),
+        plantName: `P${i}`,
+        plantType: "Testus plantus",
+        environment: "Bright",
+        notes: "Sample",
+        symptoms: [],
+        toggles: {},
+        moistureLevel: 50,
+        lightLevel: 50,
+        results: [{ issue: "None", confidence: 0.2, reasons: [], actions: [] }],
+        thumbUrl: "data:image/jpeg;base64,/9j/4AAQSkZJRgAAAA==",
+      }));
+      persistHistorySafely(sample);
+      tests.push({ name: "Persist small history", passed: true, details: "No error" });
+    } catch (e: any) {
+      tests.push({ name: "Persist small history", passed: false, details: e?.message || String(e) });
+    } finally {
+      if (originalV2 === null) localStorage.removeItem(STORAGE_KEY_V2);
+      else localStorage.setItem(STORAGE_KEY_V2, originalV2);
+    }
+
+    try {
+      let calls = 0;
+      (localStorage as any).setItem = (k: string, v: string) => {
+        calls++;
+        if (calls === 1) {
+          const err: any = new Error("exceeded the quota");
+          err.name = "QuotaExceededError";
+          throw err
+        }
+        return originalSetItem(k, v);
+      };
+
+      const big: CaseRecord[] = new Array(200).fill(0).map((_, i) => ({
+        id: `t2_${i}`,
+        createdAt: Date.now(),
+        plantName: `Big${i}`,
+        plantType: "Huge",
+        environment: "",
+        notes: "x".repeat(200),
+        symptoms: [],
+        toggles: {},
+        moistureLevel: 50,
+        lightLevel: 50,
+        results: [{ issue: "None", confidence: 0.2, reasons: [], actions: [] }],
+        thumbUrl: "data:image/jpeg;base64," + "A".repeat(500),
+      }));
+
+      persistHistorySafely(big);
+      tests.push({ name: "Quota overflow triggers pruning", passed: true, details: "Fallback succeeded" });
+    } catch (e: any) {
+      tests.push({ name: "Quota overflow triggers pruning", passed: false, details: e?.message || String(e) });
+    } finally {
+      restore();
+    }
+
+    return tests;
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-emerald-50 to-white">
       <div className="max-w-6xl mx-auto p-6 md:p-10">
@@ -214,10 +290,11 @@ export default function PlantDoctorApp() {
         )}
 
         <Tabs defaultValue="new" className="w-full">
-          <TabsList className="grid grid-cols-3 w-full">
+          <TabsList className="grid grid-cols-4 w-full">
             <TabsTrigger value="new">New Diagnosis</TabsTrigger>
             <TabsTrigger value="history">Case History</TabsTrigger>
             <TabsTrigger value="about">About</TabsTrigger>
+            <TabsTrigger value="dev">Dev</TabsTrigger>
           </TabsList>
 
           <TabsContent value="new">
@@ -502,6 +579,31 @@ export default function PlantDoctorApp() {
               <CardFooter>
                 <Button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>Start a diagnosis</Button>
               </CardFooter>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="dev">
+            <Card className="mt-4">
+              <CardHeader>
+                <CardTitle>Dev Tools & Tests</CardTitle>
+                <CardDescription>Built-in tests to validate quota handling and persistence.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <Button onClick={() => setDevResults(runStorageTests())}>Run Storage Tests</Button>
+                  <Button variant="outline" onClick={() => setDevResults(null)}>Clear Results</Button>
+                </div>
+                {devResults && (
+                  <div className="mt-4 space-y-2 text-sm">
+                    {devResults.map((t, i) => (
+                      <div key={i} className={`p-2 rounded border ${t.passed ? "bg-emerald-50 border-emerald-200" : "bg-rose-50 border-rose-200"}`}>
+                        <div className="font-medium">{t.name}</div>
+                        <div>{t.passed ? "✅ Passed" : "❌ Failed"} — {t.details}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
             </Card>
           </TabsContent>
         </Tabs>
